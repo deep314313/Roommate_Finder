@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const userSchema = new mongoose.Schema({
   name: {
@@ -38,9 +38,36 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
-  location: {
+  pgName: {
     type: String,
     default: ''
+  },
+  hasAirConditioning: {
+    type: Boolean,
+    default: false
+  },
+  foodAvailable: {
+    type: Boolean,
+    default: false
+  },
+  roomType: {
+    type: String,
+    enum: ['double', 'triple'],
+    default: 'double'
+  },
+  location: {
+    type: {
+      type: String,
+      default: 'Point'
+    },
+    coordinates: {
+      type: [Number],
+      default: [0, 0]
+    },
+    address: {
+      type: String,
+      default: ''
+    }
   },
   isProfileComplete: {
     type: Boolean,
@@ -57,4 +84,7 @@ userSchema.pre('save', function(next) {
   next();
 });
 
-module.exports = mongoose.model('User', userSchema);
+// Create a geospatial index for location-based queries
+userSchema.index({ location: '2dsphere' });
+
+export default mongoose.model('User', userSchema);

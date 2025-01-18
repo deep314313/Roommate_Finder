@@ -1,8 +1,10 @@
-const router = require('express').Router();
-const auth = require('../middleware/auth');
-const User = require('../models/User');
-const { upload, cloudinary } = require('../config/cloudinary');
-const fs = require('fs');
+import { Router } from 'express';
+import auth from '../middleware/auth.js';
+import User from '../models/User.js';
+import { upload, cloudinary } from '../config/cloudinary.js';
+import { promises as fs } from 'fs';
+
+const router = Router();
 
 // Get current user profile
 router.get('/', auth, async (req, res) => {
@@ -24,47 +26,95 @@ router.post('/upload-photo', auth, upload.single('photo'), async (req, res) => {
       return res.status(400).json({ message: 'No file uploaded' });
     }
 
-    // Upload to Cloudinary
-    const result = await cloudinary.uploader.upload(req.file.path);
-    
+    // Check if cloudinary is properly configured
+    if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+      throw new Error('Cloudinary configuration is missing');
+    }
+
+    // Upload to Cloudinary with error handling
+    let result;
+    try {
+      result = await cloudinary.uploader.upload(req.file.path, {
+        folder: 'roommate-finder',
+        transformation: [{ width: 500, height: 500, crop: 'limit' }]
+      });
+    } catch (cloudinaryError) {
+      console.error('Cloudinary upload error:', cloudinaryError);
+      throw new Error('Failed to upload image to cloud storage');
+    }
+
     // Update user's profile photo
-    const user = await User.findById(req.user.id);
-    user.profilePhoto = result.secure_url;
-    await user.save();
+    const user = await User.findByIdAndUpdate(
+      req.user.id,
+      { $set: { profilePhoto: result.secure_url } },
+      { new: true }
+    ).select('-password');
 
-    // Remove temporary file
-    fs.unlinkSync(req.file.path);
+    if (!user) {
+      throw new Error('User not found');
+    }
 
-    res.json({ url: result.secure_url });
+    // Delete the temporary file
+    if (req.file.path) {
+      fs.unlink(req.file.path, (err) => {
+        if (err) console.error('Error deleting temporary file:', err);
+      });
+    }
+
+    res.json(user);
   } catch (err) {
-    res.status(500).json({ message: 'Error uploading image' });
+    console.error('Profile photo upload error:', err);
+    
+    // Clean up temporary file if it exists
+    if (req.file && req.file.path) {
+      fs.unlink(req.file.path, (unlinkErr) => {
+        if (unlinkErr) console.error('Error deleting temporary file:', unlinkErr);
+      });
+    }
+
+    res.status(500).json({ 
+      message: 'Error uploading photo',
+      error: err.message 
+    });
   }
 });
 
-// Search users
+// Search profiles
 router.get('/search', auth, async (req, res) => {
   try {
-    const { location, collegeName, year, branch, gender, course } = req.query;
-    let query = {
-      isProfileComplete: true,
-      _id: { $ne: req.user.id }
-    };
+    const { location, collegeName, year, branch, gender, course, pgName } = req.query;
+    const query = { _id: { $ne: req.user.id } };
 
-    // Only add conditions if the parameters are provided and not empty
-    if (location && location.trim()) query.location = new RegExp(location, 'i');
-    if (collegeName && collegeName.trim()) query.collegeName = new RegExp(collegeName, 'i');
-    if (year && year.trim()) query.year = year;
-    if (branch && branch.trim()) query.branch = new RegExp(branch, 'i');
-    if (gender && gender.trim()) query.gender = gender;
-    if (course && course.trim()) query.course = new RegExp(course, 'i');
+    if (location) {
+      query['location.address'] = { $regex: location, $options: 'i' };
+    }
+    if (collegeName) {
+      query.collegeName = { $regex: collegeName, $options: 'i' };
+    }
+    if (year) {
+      query.year = year;
+    }
+    if (branch) {
+      query.branch = { $regex: branch, $options: 'i' };
+    }
+    if (gender) {
+      query.gender = gender;
+    }
+    if (course) {
+      query.course = { $regex: course, $options: 'i' };
+    }
+    if (pgName) {
+      query.pgName = { $regex: pgName, $options: 'i' };
+    }
 
-    const users = await User.find(query)
+    const profiles = await User.find(query)
       .select('-password')
-      .limit(20);
+      .sort({ createdAt: -1 });
 
-    res.json(users);
+    res.json(profiles);
   } catch (err) {
-    res.status(500).json({ message: 'Error searching users' });
+    console.error(err);
+    res.status(500).send('Server Error');
   }
 });
 
@@ -109,4 +159,58 @@ router.put('/', auth, async (req, res) => {
   }
 });
 
-module.exports = router;
+// Update PG details and location
+router.put('/update-pg-details', auth, async (req, res) => {
+  try {
+    const {
+      pgName,
+      hasAirConditioning,
+      foodAvailable,
+      roomType,
+      location
+    } = req.body;
+
+    const updateFields = {
+      pgName,
+      hasAirConditioning,
+      foodAvailable,
+      roomType,
+      location
+    };
+
+    const user = await User.findByIdAndUpdate(
+      req.user.id,
+      { $set: updateFields },
+      { new: true }
+    ).select('-password');
+
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ message: 'Error updating PG details' });
+  }
+});
+
+// Search PGs by location
+router.get('/search-pg', async (req, res) => {
+  try {
+    const { latitude, longitude, maxDistance = 5000 } = req.query; // maxDistance in meters
+
+    const pgs = await User.find({
+      location: {
+        $near: {
+          $geometry: {
+            type: 'Point',
+            coordinates: [parseFloat(longitude), parseFloat(latitude)]
+          },
+          $maxDistance: parseInt(maxDistance)
+        }
+      }
+    }).select('-password');
+
+    res.json(pgs);
+  } catch (err) {
+    res.status(500).json({ message: 'Error searching PGs' });
+  }
+});
+
+export default router;

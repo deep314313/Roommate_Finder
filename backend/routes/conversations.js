@@ -1,6 +1,8 @@
-const router = require('express').Router();
-const Conversation = require('../models/Conversation');
-const auth = require('../middleware/auth');
+import { Router } from 'express';
+import Conversation from '../models/Conversation.js';
+import auth from '../middleware/auth.js';
+
+const router = Router();
 
 // New conversation
 router.post('/', auth, async (req, res) => {
@@ -70,4 +72,4 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

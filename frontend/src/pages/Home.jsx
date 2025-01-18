@@ -9,7 +9,8 @@ const Home = () => {
     year: '',
     branch: '',
     gender: '',
-    course: ''
+    course: '',
+    pgName: ''
   });
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -129,7 +130,21 @@ const Home = () => {
                     value={filters.location}
                     onChange={handleFilterChange}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-black"
-                    placeholder="Enter location"
+                    placeholder="Search by city or area"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    PG Name
+                  </label>
+                  <input
+                    type="text"
+                    name="pgName"
+                    value={filters.pgName}
+                    onChange={handleFilterChange}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-black"
+                    placeholder="Search by PG name"
                   />
                 </div>
 
@@ -266,17 +281,39 @@ const Home = () => {
                     </div>
                     <div className="space-y-2">
                       <p className="text-sm">
-                        <span className="font-medium">Location:</span> {post.location}
+                        <span className="font-medium">Location:</span>{' '}
+                        {post.location?.address || 'Location not specified'}
                       </p>
                       <p className="text-sm">
-                        <span className="font-medium">Branch:</span> {post.branch}
+                        <span className="font-medium">PG Name:</span>{' '}
+                        {post.pgName || 'Not specified'}
                       </p>
                       <p className="text-sm">
-                        <span className="font-medium">Year:</span> {post.year}
+                        <span className="font-medium">Branch:</span>{' '}
+                        {post.branch || 'Not specified'}
                       </p>
                       <p className="text-sm">
-                        <span className="font-medium">Course:</span> {post.course}
+                        <span className="font-medium">Year:</span>{' '}
+                        {post.year || 'Not specified'}
                       </p>
+                      <p className="text-sm">
+                        <span className="font-medium">Course:</span>{' '}
+                        {post.course || 'Not specified'}
+                      </p>
+                      {(post.hasAirConditioning || post.foodAvailable) && (
+                        <div className="flex gap-2 mt-2">
+                          {post.hasAirConditioning && (
+                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                              AC
+                            </span>
+                          )}
+                          {post.foodAvailable && (
+                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                              Food Available
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}

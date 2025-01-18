@@ -1,9 +1,34 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
+import { GoogleMap, LoadScript, Marker } from '@react-google-maps/api';
+
+const libraries = ['places'];
+const mapContainerStyle = {
+  width: '100%',
+  height: '400px',
+  borderRadius: '0.5rem'
+};
+
+const defaultCenter = {
+  lat: 28.6139,
+  lng: 77.2090
+};
 
 const EditProfile = () => {
   const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [previewImage, setPreviewImage] = useState(null);
+  
+  const [location, setLocation] = useState({
+    lat: defaultCenter.lat,
+    lng: defaultCenter.lng,
+    address: ''
+  });
+
   const [profile, setProfile] = useState({
     name: '',
     email: '',
@@ -13,44 +38,103 @@ const EditProfile = () => {
     year: '',
     gender: '',
     course: '',
-    location: ''
+    pgName: '',
+    hasAirConditioning: false,
+    foodAvailable: false,
+    roomType: 'double',
   });
-  const [previewImage, setPreviewImage] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
 
-  useEffect(() => {
-    fetchProfile();
+  const onMapClick = useCallback(async (e) => {
+    const newLat = e.latLng.lat();
+    const newLng = e.latLng.lng();
+    
+    setLocation(prev => ({
+      ...prev,
+      lat: newLat,
+      lng: newLng
+    }));
+
+    try {
+      const response = await axios.get(
+        `https://maps.googleapis.com/maps/api/geocode/json?latlng=${newLat},${newLng}&key=${import.meta.env.VITE_GOOGLE_MAPS_API_KEY}`
+      );
+
+      if (response.data.results && response.data.results[0]) {
+        setLocation(prev => ({
+          ...prev,
+          address: response.data.results[0].formatted_address
+        }));
+      }
+    } catch (error) {
+      console.error('Error getting address:', error);
+    }
   }, []);
 
-  const fetchProfile = async () => {
+  const getAddressFromCoordinates = async (lat, lng) => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await axios.get(`${import.meta.env.VITE_API_URL}/api/profile`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      const userData = response.data;
-      setProfile(userData);
-      if (userData.profilePhoto) {
-        setPreviewImage(userData.profilePhoto);
+      const response = await axios.get(
+        `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${import.meta.env.VITE_GOOGLE_MAPS_API_KEY}`
+      );
+
+      if (response.data.results && response.data.results[0]) {
+        setLocation(prev => ({
+          ...prev,
+          address: response.data.results[0].formatted_address
+        }));
       }
-    } catch (err) {
-      setError('Failed to fetch profile');
+    } catch (error) {
+      console.error('Error getting address:', error);
     }
   };
 
-  const handleChange = (e) => {
-    setProfile({
-      ...profile,
-      [e.target.name]: e.target.value
-    });
-    // Clear any previous messages
-    setError('');
-    setSuccess('');
-  };
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      navigate('/login');
+      return;
+    }
+    const fetchProfile = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const response = await axios.get(`${import.meta.env.VITE_API_URL}/api/profile`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        const userData = response.data;
+        
+        setProfile({
+          name: userData.name || '',
+          email: userData.email || '',
+          photo: userData.profilePhoto || '',
+          collegeName: userData.collegeName || '',
+          branch: userData.branch || '',
+          year: userData.year || '',
+          gender: userData.gender || '',
+          course: userData.course || '',
+          pgName: userData.pgName || '',
+          hasAirConditioning: userData.hasAirConditioning || false,
+          foodAvailable: userData.foodAvailable || false,
+          roomType: userData.roomType || 'double',
+        });
+
+        if (userData.profilePhoto) {
+          setPreviewImage(userData.profilePhoto);
+        }
+        if (userData.location?.coordinates) {
+          setLocation({
+            lat: userData.location.coordinates[1],
+            lng: userData.location.coordinates[0],
+            address: userData.location.address || ''
+          });
+        }
+      } catch (err) {
+        setError('Failed to load profile');
+      }
+    };
+
+    fetchProfile();
+  }, [navigate]);
 
   const handleImageUpload = async (e) => {
     const file = e.target.files[0];
@@ -73,14 +157,14 @@ const EditProfile = () => {
       setLoading(true);
       setError('');
       
-      // Create form data
       const formData = new FormData();
       formData.append('photo', file);
 
-      // Upload to our backend
       const token = localStorage.getItem('token');
+      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+      
       const response = await axios.post(
-        `${import.meta.env.VITE_API_URL}/api/profile/upload-photo`,
+        `${API_URL}/api/profile/upload-photo`,
         formData,
         {
           headers: {
@@ -90,268 +174,343 @@ const EditProfile = () => {
         }
       );
 
-      // Update preview and profile
       setPreviewImage(URL.createObjectURL(file));
-      setProfile({ ...profile, photo: response.data.url });
+      setProfile(prev => ({ ...prev, photo: response.data.url }));
       setSuccess('Photo uploaded successfully');
     } catch (err) {
-      setError('Failed to upload image. Please try again.');
+      setError('Failed to upload image: ' + (err.response?.data?.message || err.message));
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    
-    // Validate required fields
-    const requiredFields = ['name', 'collegeName', 'branch', 'year', 'gender', 'course', 'location'];
-    const missingFields = requiredFields.filter(field => !profile[field]);
-    
-    if (missingFields.length > 0) {
-      setError(`Please fill in all required fields: ${missingFields.join(', ')}`);
-      return;
-    }
+  const handleLocationSearch = async () => {
+    if (!searchQuery) return;
 
     try {
-      setLoading(true);
-      setError('');
-      const token = localStorage.getItem('token');
-      await axios.put(
-        `${import.meta.env.VITE_API_URL}/api/profile`,
-        {
-          name: profile.name,
-          collegeName: profile.collegeName,
-          branch: profile.branch,
-          year: profile.year,
-          gender: profile.gender,
-          course: profile.course,
-          location: profile.location
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        }
+      const response = await axios.get(
+        `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
+          searchQuery
+        )}&key=${import.meta.env.VITE_GOOGLE_MAPS_API_KEY}`
       );
+
+      if (response.data.results && response.data.results.length > 0) {
+        const result = response.data.results[0];
+        const { lat, lng } = result.geometry.location;
+        setLocation({
+          lat,
+          lng,
+          address: result.formatted_address
+        });
+      }
+    } catch (error) {
+      setError('Error searching location');
+    }
+  };
+
+  const handleChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setProfile(prev => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const token = localStorage.getItem('token');
+      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+      const config = {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      };
+
+      // Update basic profile
+      await axios.put(`${API_URL}/api/profile`, {
+        name: profile.name,
+        photo: profile.photo,
+        collegeName: profile.collegeName,
+        branch: profile.branch,
+        year: profile.year,
+        gender: profile.gender,
+        course: profile.course,
+      }, config);
+
+      // Update PG details
+      await axios.put(`${API_URL}/api/profile/update-pg-details`, {
+        pgName: profile.pgName,
+        hasAirConditioning: profile.hasAirConditioning,
+        foodAvailable: profile.foodAvailable,
+        roomType: profile.roomType,
+        location: {
+          type: 'Point',
+          coordinates: [location.lng, location.lat],
+          address: location.address
+        }
+      }, config);
+
       setSuccess('Profile updated successfully');
-      setTimeout(() => {
-        navigate('/');
-      }, 1500);
+      setLoading(false);
     } catch (err) {
-      setError('Failed to update profile. Please try again.');
-    } finally {
+      setError(err.response?.data?.message || 'Failed to update profile');
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-2xl mx-auto bg-white rounded-lg shadow-md p-8">
-        <h2 className="text-3xl font-bold text-center mb-8">Edit Profile</h2>
-        
-        {error && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-md mb-4" role="alert">
-            <span className="block sm:inline">{error}</span>
-          </div>
-        )}
-        
-        {success && (
-          <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded-md mb-4" role="alert">
-            <span className="block sm:inline">{success}</span>
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Profile Photo Upload */}
-          <div className="flex flex-col items-center justify-center space-y-4">
-            <div className="relative group">
-              <div className="w-32 h-32 rounded-full overflow-hidden bg-gray-200">
-                {loading ? (
-                  <div className="w-full h-full flex items-center justify-center">
-                    <svg className="animate-spin h-8 w-8 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                  </div>
-                ) : (
-                  <img
-                    src={previewImage || '/default-avatar.png'}
-                    alt="Profile"
-                    className="w-full h-full object-cover"
-                  />
-                )}
-              </div>
-              <label className="absolute bottom-0 right-0 bg-black text-white p-2 rounded-full cursor-pointer hover:bg-gray-800 transition-colors">
-                <input
-                  type="file"
-                  accept="image/jpeg,image/png"
-                  onChange={handleImageUpload}
-                  className="hidden"
-                  disabled={loading}
+    <div className="max-w-2xl mx-auto p-4">
+      <h2 className="text-2xl font-bold mb-4">Edit Profile</h2>
+      {error && <div className="text-red-500 mb-4">{error}</div>}
+      {success && <div className="text-green-500 mb-4">{success}</div>}
+      
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {/* Profile Photo Upload */}
+        <div className="flex flex-col items-center justify-center space-y-4">
+          <div className="relative group">
+            <div className="w-32 h-32 rounded-full overflow-hidden bg-gray-200">
+              {loading ? (
+                <div className="w-full h-full flex items-center justify-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+                </div>
+              ) : (
+                <img
+                  src={previewImage || '/default-avatar.png'}
+                  alt="Profile"
+                  className="w-full h-full object-cover"
                 />
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-              </label>
+              )}
             </div>
-            <p className="text-sm text-gray-500">Click to upload profile photo (Max 5MB)</p>
-          </div>
-
-          {/* Name Field */}
-          <div>
-            <label htmlFor="name" className="block text-sm font-medium text-gray-700">
-              Name *
+            <label className="absolute bottom-0 right-0 bg-black bg-opacity-75 text-white p-2 rounded-full cursor-pointer hover:bg-opacity-90">
+              <input
+                type="file"
+                accept="image/jpeg,image/png"
+                onChange={handleImageUpload}
+                className="hidden"
+                disabled={loading}
+              />
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
             </label>
+          </div>
+          <p className="text-sm text-gray-500">Click to upload profile photo (Max 5MB)</p>
+        </div>
+
+        {/* Basic Profile Fields */}
+        <div className="space-y-4">
+          <div>
+            <label className="block mb-1">Name</label>
             <input
               type="text"
-              id="name"
               name="name"
               value={profile.name}
               onChange={handleChange}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-black focus:ring-black sm:text-sm"
+              className="w-full p-2 border rounded"
               required
             />
           </div>
 
-          {/* Email Field - Read Only */}
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-              Email
-            </label>
+            <label className="block mb-1">Email</label>
             <input
               type="email"
-              id="email"
               name="email"
-              value={profile.email}
-              className="mt-1 block w-full rounded-md border-gray-300 bg-gray-50 shadow-sm sm:text-sm cursor-not-allowed"
+              value={profile.email || ''}
+              className="w-full p-2 border rounded bg-gray-50"
               disabled
+              readOnly
             />
           </div>
 
-          {/* Form Fields */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label htmlFor="collegeName" className="block text-sm font-medium text-gray-700">
-                College Name *
-              </label>
-              <input
-                type="text"
-                id="collegeName"
-                name="collegeName"
-                value={profile.collegeName}
-                onChange={handleChange}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-black focus:ring-black sm:text-sm"
-                required
-              />
-            </div>
-
-            <div>
-              <label htmlFor="branch" className="block text-sm font-medium text-gray-700">
-                Branch *
-              </label>
-              <input
-                type="text"
-                id="branch"
-                name="branch"
-                value={profile.branch}
-                onChange={handleChange}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-black focus:ring-black sm:text-sm"
-                required
-              />
-            </div>
-
-            <div>
-              <label htmlFor="year" className="block text-sm font-medium text-gray-700">
-                Year *
-              </label>
-              <select
-                id="year"
-                name="year"
-                value={profile.year}
-                onChange={handleChange}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-black focus:ring-black sm:text-sm"
-                required
-              >
-                <option value="">Select year</option>
-                <option value="1">1st Year</option>
-                <option value="2">2nd Year</option>
-                <option value="3">3rd Year</option>
-                <option value="4">4th Year</option>
-              </select>
-            </div>
-
-            <div>
-              <label htmlFor="gender" className="block text-sm font-medium text-gray-700">
-                Gender *
-              </label>
-              <select
-                id="gender"
-                name="gender"
-                value={profile.gender}
-                onChange={handleChange}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-black focus:ring-black sm:text-sm"
-                required
-              >
-                <option value="">Select gender</option>
-                <option value="male">Male</option>
-                <option value="female">Female</option>
-                <option value="other">Other</option>
-              </select>
-            </div>
-
-            <div>
-              <label htmlFor="course" className="block text-sm font-medium text-gray-700">
-                Course *
-              </label>
-              <input
-                type="text"
-                id="course"
-                name="course"
-                value={profile.course}
-                onChange={handleChange}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-black focus:ring-black sm:text-sm"
-                required
-              />
-            </div>
-
-            <div>
-              <label htmlFor="location" className="block text-sm font-medium text-gray-700">
-                Location *
-              </label>
-              <input
-                type="text"
-                id="location"
-                name="location"
-                value={profile.location}
-                onChange={handleChange}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-black focus:ring-black sm:text-sm"
-                required
-              />
-            </div>
+          <div>
+            <label className="block mb-1">College Name</label>
+            <input
+              type="text"
+              name="collegeName"
+              value={profile.collegeName}
+              onChange={handleChange}
+              className="w-full p-2 border rounded"
+              required
+            />
           </div>
 
-          <div className="flex justify-end">
-            <button
-              type="submit"
-              disabled={loading}
-              className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-black hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black disabled:opacity-50 disabled:cursor-not-allowed"
+          <div>
+            <label className="block mb-1">Branch</label>
+            <input
+              type="text"
+              name="branch"
+              value={profile.branch}
+              onChange={handleChange}
+              className="w-full p-2 border rounded"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block mb-1">Year</label>
+            <select
+              name="year"
+              value={profile.year}
+              onChange={handleChange}
+              className="w-full p-2 border rounded"
+              required
             >
-              {loading ? (
-                <>
-                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Saving...
-                </>
-              ) : (
-                'Save Profile'
-              )}
-            </button>
+              <option value="">Select Year</option>
+              <option value="1">1st Year</option>
+              <option value="2">2nd Year</option>
+              <option value="3">3rd Year</option>
+              <option value="4">4th Year</option>
+            </select>
           </div>
-        </form>
-      </div>
+
+          <div>
+            <label className="block mb-1">Gender</label>
+            <select
+              name="gender"
+              value={profile.gender}
+              onChange={handleChange}
+              className="w-full p-2 border rounded"
+              required
+            >
+              <option value="">Select Gender</option>
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block mb-1">Course</label>
+            <input
+              type="text"
+              name="course"
+              value={profile.course}
+              onChange={handleChange}
+              className="w-full p-2 border rounded"
+              required
+            />
+          </div>
+        </div>
+
+        {/* PG Details */}
+        <div className="space-y-4">
+          <h3 className="text-xl font-semibold">PG Details</h3>
+          
+          <div>
+            <label className="block mb-1">PG Name</label>
+            <input
+              type="text"
+              name="pgName"
+              value={profile.pgName}
+              onChange={handleChange}
+              className="w-full p-2 border rounded"
+            />
+          </div>
+
+          <div className="flex items-center space-x-4">
+            <label className="flex items-center">
+              <input
+                type="checkbox"
+                name="hasAirConditioning"
+                checked={profile.hasAirConditioning}
+                onChange={handleChange}
+                className="mr-2"
+              />
+              Air Conditioning Available
+            </label>
+
+            <label className="flex items-center">
+              <input
+                type="checkbox"
+                name="foodAvailable"
+                checked={profile.foodAvailable}
+                onChange={handleChange}
+                className="mr-2"
+              />
+              Food Available
+            </label>
+          </div>
+
+          <div>
+            <label className="block mb-1">Room Type</label>
+            <select
+              name="roomType"
+              value={profile.roomType}
+              onChange={handleChange}
+              className="w-full p-2 border rounded"
+            >
+              <option value="double">Double Sharing</option>
+              <option value="triple">Triple Sharing</option>
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <label className="block">Location</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search for a location"
+                className="flex-1 p-2 border rounded"
+              />
+              <button
+                type="button"
+                onClick={handleLocationSearch}
+                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+              >
+                Search
+              </button>
+            </div>
+            
+            <LoadScript
+              googleMapsApiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY}
+              libraries={libraries}
+            >
+              <GoogleMap
+                mapContainerStyle={mapContainerStyle}
+                center={{ lat: location.lat, lng: location.lng }}
+                zoom={15}
+                onClick={onMapClick}
+                options={{
+                  streetViewControl: false,
+                  mapTypeControl: false,
+                  fullscreenControl: false
+                }}
+              >
+                {location.lat && location.lng && (
+                  <Marker
+                    position={{ lat: location.lat, lng: location.lng }}
+                    icon={{
+                      url: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png'
+                    }}
+                  />
+                )}
+              </GoogleMap>
+            </LoadScript>
+            
+            {location.address && (
+              <p className="text-sm mt-2">
+                Selected Address: {location.address}
+              </p>
+            )}
+          </div>
+        </div>
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 disabled:bg-blue-300"
+        >
+          {loading ? 'Saving...' : 'Save Changes'}
+        </button>
+      </form>
     </div>
   );
 };

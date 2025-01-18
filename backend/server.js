@@ -1,17 +1,18 @@
-require('dotenv').config();
-//import path from 'path';
-const express = require('express');
-const mongoose = require('mongoose');
-const cors = require('cors');
-const authRoutes = require('./routes/auth');
-const profileRoutes = require('./routes/profile');
-const messageRoutes = require('./routes/messages');
-const conversationRoutes = require('./routes/conversations');
-const http = require('http');
-const { Server } = require('socket.io');
-//const _dirname = path.resolve();
+import 'dotenv/config';
+import path from 'path';
+import express from 'express';
+import mongoose from 'mongoose';
+import cors from 'cors';
+import authRoutes from './routes/auth.js';
+import profileRoutes from './routes/profile.js';
+import messageRoutes from './routes/messages.js';
+import conversationRoutes from './routes/conversations.js';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
+
+const __dirname = path.resolve();
 const app = express();
-const server = http.createServer(app);
+const server = createServer(app);
 const io = new Server(server, {
   cors: {
     origin: "http://localhost:5173",
@@ -66,10 +67,10 @@ io.on('connection', (socket) => {
     io.emit('getUsers', users);
   });
 });
-// app.use(express.static(path.join(_dirname,"/frontend/dist")));
-// app.get('*',(req,res)=>{
-//   res.sendFile(path.resolve(_dirname,"frontend","dist","index.html"));
-// });
+app.use(express.static(path.join(__dirname,"/frontend/dist")));
+app.get('*',(req,res)=>{
+  res.sendFile(path.resolve(__dirname,"frontend","dist","index.html"));
+});
 // Connect to MongoDB
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => {
