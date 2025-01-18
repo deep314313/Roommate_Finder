@@ -31,7 +31,7 @@ const Register = () => {
       setLoading(true);
       setError('');
       const { confirmPassword, ...submitData } = formData;
-      const response = await axios.post('http://localhost:5000/api/auth/register', submitData);
+      const response = await axios.post('https://roommate-t3ww.onrender.com/api/auth/register', submitData);
       if (response.data) {
         navigate('/login');
       }
